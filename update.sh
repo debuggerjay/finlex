@@ -1,33 +1,39 @@
 #! /usr/bin/env bash
 set -Eeuo pipefail
 
-base=https://data.finlex.fi
-cat > archives-xml.list <<EOF
-https://data.finlex.fi/download/xml/asd/asd-fi.zip
-https://data.finlex.fi/download/xml/asd/asd-sv.zip
-https://data.finlex.fi/download/xml/kho/kho-fi.zip
-https://data.finlex.fi/download/xml/kho/kko-sv.zip
-https://data.finlex.fi/download/xml/kko/kko-fi.zip
-https://data.finlex.fi/download/xml/kko/kko-sv.zip
+base=https://www.finlex.fi
+
+# Lainsäädäntö (Legislation) - NOTE: statute.zip (9.5 Gt) omitted due to size
+cat > archives-lainsaadanto.list <<EOF
+https://www.finlex.fi/api/assets/open-data/archives/statute-consolidated.zip
+https://www.finlex.fi/api/assets/open-data/archives/statute-foreign-language-translation.zip
+https://www.finlex.fi/api/assets/open-data/archives/statute-sami-translation.zip
 EOF
 
-cat > archives-jsonld.list <<EOF
-https://data.finlex.fi/download/rdf/sd-jsonld-fi.zip
-https://data.finlex.fi/download/rdf/kko-jsonld-fi.zip
-https://data.finlex.fi/download/rdf/kho-jsonld-fi.zip
+# Oikeuskäytäntö (Case law)
+cat > archives-oikeuskaytanto.list <<EOF
+https://www.finlex.fi/api/assets/open-data/archives/legal-literature-references.zip
 EOF
 
-cat > archives-nq.list <<EOF
-https://data.finlex.fi/download/rdf/ajantasa-nq.zip
-https://data.finlex.fi/download/rdf/kko-nq.zip
-https://data.finlex.fi/download/rdf/kho-nq.zip
-https://data.finlex.fi/download/rdf/alkup-nq.zip
+# Viranomaiset (Authorities) - NOTE: authority-regulation.zip (2.3 Gt) omitted due to size
+cat > archives-viranomaiset.list <<EOF
+https://www.finlex.fi/api/assets/open-data/archives/chancellor-of-justice-decision.zip
+https://www.finlex.fi/api/assets/open-data/archives/data-protection-ombudsman-decision.zip
+https://www.finlex.fi/api/assets/open-data/archives/collective-agreement-general-applicability-decision.zip
+https://www.finlex.fi/api/assets/open-data/archives/trade-union-center-agreement.zip
+EOF
+
+# Valtiosopimukset (State treaties)
+cat > archives-valtiosopimukset.list <<EOF
+https://www.finlex.fi/api/assets/open-data/archives/tax-treaty-consolidated.zip
+https://www.finlex.fi/api/assets/open-data/archives/treaty.zip
+https://www.finlex.fi/api/assets/open-data/archives/treaty-metadata.zip
 EOF
 
 
 import_zip() {
-    if [[ $# != 3 ]]; then
-        echo "Usage: import_zip zipfile(filename) update_timestamp archive_type" >&2
+    if [[ $# != 2 ]]; then
+        echo "Usage: import_zip zipfile(filename) update_timestamp" >&2
         exit 1
     fi
     zipfile=$1
@@ -48,15 +54,9 @@ import_zip() {
     newest_ctime=$(set +o pipefail; find "$dir" -type f -exec stat -c %W/%Y {} + | tr / '\n' | sort -rn | head -n1)
     timestamp=$(TZ=Europe/Helsinki date -R -d "@${newest_ctime}")
 
-    if [[ $archive_type = xml ]]; then
-        output=data
-        # asd-fi.zip -> data/asd/fi
-        dest_dir=$output/$(basename "$zipfile" .zip | sed 's#-#/#')
-        output=$(readlink -f "$output")
-    else
-        output=data/$(basename "$zipfile" .zip)
-        dest_dir=$output
-    fi
+    # Extract to data/<archive-name-without-extension>/
+    output=data/$(basename "$zipfile" .zip)
+    dest_dir=$output
     rsync -a "$dir"/ "$output"/
     git add "$dest_dir"
 
@@ -73,10 +73,9 @@ mkdir -p data/
 mkdir -p archives/
 touch archives/.dummy
 
-# NB: disabled nq/nquads since there are files >100MB in there.
-# 100MB/file is the maximum limit for Github.
-#for archive_type in xml jsonld nq; do
-for archive_type in xml jsonld; do
+# Archive categories from www.finlex.fi/fi/avoin-data/lataa-aineistoja
+# NOTE: Large files (statute.zip 9.5Gt, authority-regulation.zip 2.3Gt, government-proposal.zip 11.9Gt) are omitted
+for archive_type in lainsaadanto oikeuskaytanto viranomaiset valtiosopimukset; do
 cat archives-"$archive_type".list |
 while read -r url; do
     file=$(basename "$url")
@@ -125,7 +124,7 @@ while read -r url; do
     fi
 
     echo "Importing $file"
-    import_zip "$file_path" "$new_timestamp" "$archive_type"
+    import_zip "$file_path" "$new_timestamp"
     mv "$file_path".metadata.new "$file_path".metadata
 done # /url
 done # /archive_type
